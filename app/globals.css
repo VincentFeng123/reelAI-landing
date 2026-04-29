@@ -136,14 +136,220 @@ body {
   animation: pillar-dot-pulse 2.6s ease-in-out infinite;
 }
 
-/* Nav: full-width frosted bar on scroll. No border, no pill, no white tint. */
+/* PROGRESSIVE BLUR — the AndrewPrifer/progressive-blur recipe.
+   Eight layers stacked, each with its own `backdrop-filter: blur()`
+   value following an EXPONENTIAL progression (each ≈ 1.67× the
+   next: 20, 11.97, 7.16, 4.29, 2.57, 1.54, 0.92, 0.55). Exponential
+   ratios match how the eye perceives blur logarithmically — equal
+   visual steps require geometric radius steps.
+   Each layer's mask is TRAPEZOIDAL with a fully-opaque "plateau"
+   that tiles edge-to-edge with its neighbours' plateaus at 12.5%
+   boundaries. At any Y, only ONE layer is at full alpha; the only
+   blending happens in the narrow ramp regions, and there the
+   adjacent layers' radii are only 1.67× apart, which is visually
+   indistinguishable. No fade-over-fade ghosting → no visible
+   bands.
+   Two anti-banding finishers:
+     • `isolation: isolate` on the wrapper — prevents Chromium from
+       collapsing backdrop contexts (the #1 source of seams).
+     • `transform: translateZ(0)` on each layer — forces independent
+       compositor layers so masks keep their precision.
+   No varying saturate() between layers — different saturate values
+   cause colour-shift seams. */
 .nav-frost {
-  backdrop-filter: blur(22px) saturate(160%);
-  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  isolation: isolate;
+}
+
+.nav-frost-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transform: translateZ(0);
+}
+
+/* Layer 1 — heaviest blur, plateau 0%–12.5% (top edge). */
+.nav-frost-layer-1 {
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    #000 12.5%,
+    transparent 25%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    #000 12.5%,
+    transparent 25%
+  );
+}
+
+/* Layer 2 — plateau 12.5%–25%. */
+.nav-frost-layer-2 {
+  backdrop-filter: blur(11.97px);
+  -webkit-backdrop-filter: blur(11.97px);
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    #000 12.5%,
+    #000 25%,
+    transparent 37.5%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    #000 12.5%,
+    #000 25%,
+    transparent 37.5%
+  );
+}
+
+/* Layer 3 — plateau 25%–37.5%. */
+.nav-frost-layer-3 {
+  backdrop-filter: blur(7.16px);
+  -webkit-backdrop-filter: blur(7.16px);
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 12.5%,
+    #000 25%,
+    #000 37.5%,
+    transparent 50%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 12.5%,
+    #000 25%,
+    #000 37.5%,
+    transparent 50%
+  );
+}
+
+/* Layer 4 — plateau 37.5%–50%. */
+.nav-frost-layer-4 {
+  backdrop-filter: blur(4.29px);
+  -webkit-backdrop-filter: blur(4.29px);
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 25%,
+    #000 37.5%,
+    #000 50%,
+    transparent 62.5%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 25%,
+    #000 37.5%,
+    #000 50%,
+    transparent 62.5%
+  );
+}
+
+/* Layer 5 — plateau 50%–62.5%. */
+.nav-frost-layer-5 {
+  backdrop-filter: blur(2.57px);
+  -webkit-backdrop-filter: blur(2.57px);
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 37.5%,
+    #000 50%,
+    #000 62.5%,
+    transparent 75%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 37.5%,
+    #000 50%,
+    #000 62.5%,
+    transparent 75%
+  );
+}
+
+/* Layer 6 — plateau 62.5%–75%. */
+.nav-frost-layer-6 {
+  backdrop-filter: blur(1.54px);
+  -webkit-backdrop-filter: blur(1.54px);
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 50%,
+    #000 62.5%,
+    #000 75%,
+    transparent 87.5%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 50%,
+    #000 62.5%,
+    #000 75%,
+    transparent 87.5%
+  );
+}
+
+/* Layer 7 — plateau 75%–87.5%. */
+.nav-frost-layer-7 {
+  backdrop-filter: blur(0.92px);
+  -webkit-backdrop-filter: blur(0.92px);
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 62.5%,
+    #000 75%,
+    #000 87.5%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 62.5%,
+    #000 75%,
+    #000 87.5%,
+    transparent 100%
+  );
+}
+
+/* Layer 8 — plateau 87.5%–100% (bottom edge). The blur is so small
+   here (0.55 px ≈ 0) that the bottom-edge clip is invisible. */
+.nav-frost-layer-8 {
+  backdrop-filter: blur(0.55px);
+  -webkit-backdrop-filter: blur(0.55px);
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 75%,
+    #000 87.5%,
+    #000 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 75%,
+    #000 87.5%,
+    #000 100%
+  );
+}
+
+/* Dark overlay — pure-black gradient on its own element so it
+   doesn't share a layer with any backdrop-filter. Heavy black
+   holds across most of the bar, fading only in the bottom ~30%
+   so the dark portion is visually dominant (rather than the
+   gradient stretching evenly across the whole bar height). */
+.nav-frost-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0.92) 0%,
+    rgba(0, 0, 0, 0.85) 40%,
+    rgba(0, 0, 0, 0.5) 75%,
+    rgba(0, 0, 0, 0) 100%
+  );
 }
 
 /* Footer: full-width frosted base with a thin top hairline. */
+.footer-stage {
+  isolation: isolate;
+}
+
 .footer-frost {
+  position: relative;
+  z-index: 1;
   background: linear-gradient(
     180deg,
     rgba(255, 255, 255, 0.05) 0%,
@@ -152,6 +358,47 @@ body {
   backdrop-filter: blur(24px) saturate(150%);
   -webkit-backdrop-filter: blur(24px) saturate(150%);
   border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Reserves room for the huge bottom wordmark (which is absolutely
+   positioned) so the column content above it doesn't crash into the
+   letterforms. Tracks the wordmark's font-size + line-height — kept
+   tight so the footer doesn't waste vertical space. */
+.footer-pad-bottom {
+  padding-bottom: clamp(110px, 16vw, 240px);
+}
+
+/* ---------- Footer wordmark ---------- */
+
+/* Anchored absolutely to the bottom-LEFT of the footer. The R sits
+   right against the left edge (with a tiny breathing-padding so it
+   doesn't touch the literal viewport border) and the descender of
+   the I lines up flush with the bottom edge — overflow-hidden on
+   <footer> clips any pixel that pokes below. Smaller font-size
+   than before so the wordmark sits higher and the footer is less
+   tall overall. */
+.footer-wordmark {
+  position: absolute;
+  inset: auto auto 0 0;
+  text-align: left;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 300;
+  font-size: clamp(100px, 18vw, 280px);
+  line-height: 0.85;
+  letter-spacing: -0.05em;
+  color: rgba(255, 255, 255, 0.95);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 5;
+  padding-left: clamp(16px, 2.6vw, 48px);
+}
+
+.footer-wordmark > span {
+  display: inline-block;
+  /* Pull the line-box down so the italic descenders (the I tail in
+     particular) align with the footer's bottom edge. */
+  margin-bottom: -0.04em;
 }
 
 .divider {
@@ -198,19 +445,60 @@ body {
   90% { transform: translate(-1%, 5%); }
 }
 
-/* ---------- Loading screen (editorial cinema title) ---------- */
+/* Lock scrolling during the loader so wheel / touch can't push the user
+   into Section II's range — without this, when `loaderActive` flips
+   false, PrismController reads the new scrollY and jumps the prism to
+   the active section's pose (rotZ = 50° in section II). */
+body:not(.reelai-loaded) {
+  overflow: hidden;
+}
 
+/* ---------- Content gate ----------
+
+   Everything in the page (Nav, Scrollbar, Hero, sections, footer) lives
+   inside `.reelai-content`. The wrapper starts hidden — only the canvas
+   (z-0, behind) and the loader overlay (z-100, on top) paint during the
+   loading phase. LoadingScreen adds `body.reelai-loaded` once the prism
+   assembly finishes; the CSS rule below then fades the content in.
+
+   Initial state is `opacity: 0; visibility: hidden` so even before any
+   JS runs, the DOM behind the loader stays dark. The transition delay
+   on the loaded state gives the loader's own slide-up exit a head start
+   so they don't collide. */
+.reelai-content {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 0.7s cubic-bezier(0.65, 0, 0.35, 1),
+    visibility 0s linear 0.7s;
+}
+
+/* Content fade-in is delayed by 0.85 s — exactly the loader-overlay's own
+   exit transition (`.loader-overlay { transition: opacity 0.85s ... }`) —
+   so the page waits until the loader has fully disappeared before
+   anything starts revealing. The user explicitly asked for this; do not
+   shorten the delay or the loader and content will be visible at the
+   same time. */
+body.reelai-loaded .reelai-content {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition:
+    opacity 0.7s cubic-bezier(0.65, 0, 0.35, 1) 0.85s,
+    visibility 0s linear 0.85s;
+}
+
+/* ---------- Loading screen (right-side title stack only) ---------- */
+
+/* No dark overlay — the body's bg-ink-50 is already dark and the main
+   canvas paints the prism in its loader pose underneath. The overlay
+   element exists only to host the right-side text and to drive the
+   exit fade via [data-fading="true"]. */
 .loader-overlay {
   position: fixed;
   inset: 0;
   z-index: 100;
-  background:
-    radial-gradient(
-      ellipse at center,
-      #0c0c0c 0%,
-      #050505 55%,
-      #000000 100%
-    );
   pointer-events: none;
   overflow: hidden;
   transition:
@@ -223,146 +511,71 @@ body {
   visibility: hidden;
 }
 
-/* Subtle blueprint grid + drift */
-.loader-grid {
-  position: absolute;
-  inset: -80px;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
-  background-size: 96px 96px;
-  mask-image: radial-gradient(ellipse at center, black 25%, transparent 70%);
-  -webkit-mask-image: radial-gradient(ellipse at center, black 25%, transparent 70%);
-  animation: loader-grid-drift 28s linear infinite;
-}
-
-@keyframes loader-grid-drift {
-  to { background-position: 96px 96px, 96px 96px; }
-}
-
-/* Cinematic vignette darker at edges than the radial */
-.loader-vignette {
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(
-    ellipse at center,
-    transparent 50%,
-    rgba(0, 0, 0, 0.6) 100%
-  );
-  pointer-events: none;
-}
-
-/* Vertical hairlines framing the wordmark area */
-.loader-rule {
-  position: absolute;
-  background: rgba(255, 255, 255, 0.07);
-  pointer-events: none;
-}
-.loader-rule--v { top: 0; bottom: 0; width: 1px; }
-
-/* Corner brackets — snap in from offscreen at mount */
-.loader-corner {
-  position: absolute;
-  width: 64px;
-  height: 64px;
-  pointer-events: none;
-  opacity: 0;
-  animation: loader-corner-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.05s forwards;
-}
-.loader-corner--tl {
-  top: 28px; left: 28px;
-  border-top: 1px solid rgba(255, 255, 255, 0.9);
-  border-left: 1px solid rgba(255, 255, 255, 0.9);
-  transform: translate(-32px, -32px);
-}
-.loader-corner--tr {
-  top: 28px; right: 28px;
-  border-top: 1px solid rgba(255, 255, 255, 0.9);
-  border-right: 1px solid rgba(255, 255, 255, 0.9);
-  transform: translate(32px, -32px);
-}
-.loader-corner--bl {
-  bottom: 28px; left: 28px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.9);
-  border-left: 1px solid rgba(255, 255, 255, 0.9);
-  transform: translate(-32px, 32px);
-}
-.loader-corner--br {
-  bottom: 28px; right: 28px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.9);
-  border-right: 1px solid rgba(255, 255, 255, 0.9);
-  transform: translate(32px, 32px);
-}
-
-@keyframes loader-corner-in {
-  to { opacity: 1; transform: translate(0, 0); }
-}
-
-/* Mono editorial annotations at each corner */
-.loader-meta {
-  position: absolute;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.32em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.55);
-  white-space: nowrap;
-  opacity: 0;
-  animation: loader-meta-in 0.6s ease-out 0.35s forwards;
-}
-.loader-meta--tl { top: 60px; left: 64px; }
-.loader-meta--tr { top: 60px; right: 64px; }
-.loader-meta--bl { bottom: 60px; left: 64px; }
-.loader-meta--br { bottom: 60px; right: 64px; }
-
-@keyframes loader-meta-in {
-  to { opacity: 1; }
-}
-
-.loader-meta-key {
-  color: rgba(255, 255, 255, 0.3);
-}
-
-.loader-meta-tick {
-  display: block;
-  width: 18px;
-  height: 1px;
-  background: rgba(255, 255, 255, 0.25);
-}
-
-.loader-tc {
-  color: white;
-  font-variant-numeric: tabular-nums;
-  min-width: 7.5em;
-  text-align: right;
-}
-
-.loader-pct {
-  color: white;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.2em;
-}
-.loader-pct-slash { color: rgba(255, 255, 255, 0.3); margin: 0 4px; }
-
-/* Centre stage */
+/* Two-column stage: empty left (canvas shows through) + right title stack. */
 .loader-stage {
   position: absolute;
   inset: 0;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 22px;
-  padding: 0 40px;
+  gap: clamp(48px, 8vw, 120px);
+  padding: 0 clamp(40px, 6vw, 80px);
+}
+
+@media (max-width: 760px) {
+  .loader-stage {
+    flex-direction: column;
+    gap: 36px;
+    padding: 40px 24px;
+  }
+}
+
+/* Reserves left-side space; the canvas behind paints the prism here. */
+.loader-crystal-wrap {
+  flex: 0 0 auto;
+  width: clamp(180px, 24vw, 280px);
+}
+@media (max-width: 760px) {
+  .loader-crystal-wrap {
+    width: clamp(140px, 50vw, 200px);
+    height: 240px;
+  }
+}
+
+/* ---------- Title stack (right) ---------- */
+
+.loader-title-wrap {
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
+  max-width: 480px;
+  /* Slide-up exit — every direct child translates up + fades when the
+     overlay enters its fading state, matching Hero's incoming
+     yPercent: 110 → 0 reveal so the visual handoff reads as one motion
+     in the same direction. */
+  transition:
+    transform 0.85s cubic-bezier(0.65, 0, 0.35, 1),
+    opacity 0.65s cubic-bezier(0.65, 0, 0.35, 1);
+}
+.loader-overlay[data-fading="true"] .loader-title-wrap {
+  transform: translateY(-110%);
+  opacity: 0;
+}
+
+@media (max-width: 760px) {
+  .loader-title-wrap {
+    align-items: center;
+    text-align: center;
+  }
 }
 
 .loader-eyebrow {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
   font-family: var(--font-mono);
   font-size: 9px;
   letter-spacing: 0.42em;
@@ -377,24 +590,24 @@ body {
   height: 1px;
   background: rgba(255, 255, 255, 0.35);
 }
+@keyframes loader-meta-in {
+  to { opacity: 1; }
+}
 
-/* The hero wordmark — italic Fraunces, big as it dares */
 .loader-wordmark {
   font-family: var(--font-display);
   font-style: italic;
   font-weight: 300;
-  font-size: clamp(80px, 14vw, 220px);
+  font-size: clamp(64px, 9vw, 140px);
   letter-spacing: -0.05em;
   line-height: 0.86;
   color: white;
   margin: 0;
   display: flex;
   white-space: nowrap;
-  /* slight horizontal compositing nudge so italic descenders don't clip */
   padding: 0 0.04em;
 }
 
-/* Each character: blur-defocus reveal, staggered via inline animation-delay */
 .loader-char {
   display: inline-block;
   opacity: 0;
@@ -411,153 +624,132 @@ body {
   }
 }
 
-/* Ruler hairline — grows beneath the wordmark with end-ticks */
-.loader-ruler {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  width: clamp(280px, 36vw, 540px);
-  opacity: 0;
-  animation: loader-meta-in 0.6s ease-out 0.7s forwards;
-}
-.loader-ruler-tick {
-  display: block;
-  width: 1px;
-  height: 9px;
-  background: rgba(255, 255, 255, 0.6);
-}
-.loader-ruler-line {
-  flex: 1;
-  height: 1px;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0.55) 50%,
-    transparent 100%
-  );
-  transform-origin: center;
-  animation: loader-ruler-grow 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.7s both;
-}
+/* ---------- Loader subtitle (editorial italic phrases) ----------
 
-@keyframes loader-ruler-grow {
-  from { transform: scaleX(0); }
-  to   { transform: scaleX(1); }
-}
+   The subtitle morphs through a sequence of phrases drawn from
+   ReelAI's actual indexing process. Each phrase is rendered as
+   per-character spans with a staggered blur-in entry — and a mirrored
+   blur-out exit when it's swapped for the next. Display-italic
+   typography matches the wordmark's voice (no terminal cursor, no
+   prefix arrow) so the loader reads as one cohesive editorial moment
+   rather than a console log. */
 
-/* Caption under the ruler — typewriter-style, swaps through CAPTIONS */
 .loader-caption {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.42em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.85);
-  opacity: 0;
-  animation: loader-meta-in 0.5s ease-out 0.95s forwards;
-  min-height: 1em;
-}
-
-.loader-caption-prefix {
-  color: rgba(255, 255, 255, 0.45);
-}
-
-.loader-caption-text {
-  display: inline-block;
-  min-width: 22ch;
-  text-align: left;
-}
-
-.loader-caption-cursor {
-  color: rgba(255, 255, 255, 0.65);
-  animation: loader-cursor-blink 0.9s steps(2) infinite;
-}
-
-@keyframes loader-cursor-blink {
-  0%, 49% { opacity: 1; }
-  50%, 100% { opacity: 0; }
-}
-
-/* Boot stream — fake telemetry feed */
-.loader-stream {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  color: rgba(255, 255, 255, 0.55);
-  text-align: left;
-  width: clamp(280px, 36vw, 540px);
-  height: 5em;
   position: relative;
-  overflow: hidden;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 300;
+  font-size: clamp(20px, 1.7vw, 28px);
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  color: rgba(255, 255, 255, 0.78);
+  /* Reserve a stable height so the layout doesn't shift as phrases
+     swap. clamp matches font-size's line-height. */
+  min-height: 1.4em;
+  /* Containing context for the absolutely-positioned in/out phrases. */
+  display: block;
+  /* The phrase fades in via per-char animation; the container itself
+     is fully opaque from entry. */
   opacity: 0;
-  animation: loader-meta-in 0.6s ease-out 1.1s forwards;
-  margin-top: 4px;
+  animation: loader-meta-in 0.4s ease-out 0.6s forwards;
 }
 
-.loader-stream-line {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  line-height: 1.4;
+/* Each phrase (incoming or outgoing) is its own absolutely-positioned
+   span layered at the same baseline so they can stagger in / out
+   concurrently without nudging each other. */
+.loader-caption-text {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: inline-block;
   white-space: nowrap;
 }
 
-.loader-stream-prompt {
-  color: rgba(255, 255, 255, 0.3);
-  width: 0.8em;
+.loader-caption-char {
+  display: inline-block;
+  opacity: 0;
+  filter: blur(10px);
+  transform: translateY(0.22em);
+  animation: loader-caption-char-in 0.7s cubic-bezier(0.16, 1, 0.3, 1)
+    forwards;
+  will-change: transform, opacity, filter;
+}
+
+@keyframes loader-caption-char-in {
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+
+.loader-caption-text-out .loader-caption-char {
+  /* When a phrase is being replaced, override the in-animation with an
+     out-animation that mirrors the entry — chars blur and lift upward
+     instead of settling downward. */
+  animation: loader-caption-char-out 0.5s cubic-bezier(0.65, 0, 0.35, 1)
+    forwards;
+}
+
+@keyframes loader-caption-char-out {
+  to {
+    opacity: 0;
+    filter: blur(10px);
+    transform: translateY(-0.18em);
+  }
+}
+
+/* Big bottom-right percent counter. Sits in the corner of the loader
+   overlay (not the title stack), large display-italic numerals so it
+   reads as the dominant progress signal. Fades in once on entry; the
+   `.loader-overlay` parent's exit transition takes it out at hand-off. */
+.loader-pct-big {
+  position: absolute;
+  bottom: clamp(28px, 4vw, 56px);
+  right: clamp(36px, 5vw, 72px);
+  display: flex;
+  align-items: baseline;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 300;
+  font-size: clamp(120px, 15vw, 220px);
+  letter-spacing: -0.05em;
+  line-height: 0.82;
+  color: white;
+  font-variant-numeric: tabular-nums;
+  opacity: 0;
+  animation: loader-meta-in 0.8s ease-out 0.45s forwards;
+  pointer-events: none;
+}
+
+.loader-pct-big-num {
   display: inline-block;
 }
 
-/* Horizontal scan-line — sweeps continuously top to bottom */
-.loader-scan {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0.7) 50%,
-    transparent 100%
-  );
-  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.45));
-  pointer-events: none;
-  animation: loader-scan 3.4s cubic-bezier(0.6, 0, 0.4, 1) infinite;
-  opacity: 0;
-  animation-delay: 0.25s;
-  animation-fill-mode: both;
+.loader-pct-big-symbol {
+  font-size: 0.42em;
+  font-style: italic;
+  color: rgba(255, 255, 255, 0.55);
+  margin-left: 0.06em;
+  /* Lift the % glyph so its visual centre sits near the cap height of
+     the digits rather than dropping to the baseline. */
+  transform: translateY(-0.85em);
 }
 
-@keyframes loader-scan {
-  0%   { top: 0;    opacity: 0; }
-  8%   { opacity: 0.95; }
-  92%  { opacity: 0.95; }
-  100% { top: 100%; opacity: 0; }
-}
-
-/* On exit, accelerate + dramatic outward translate of corners */
-.loader-overlay[data-fading="true"] .loader-corner--tl { transform: translate(-60px, -60px); }
-.loader-overlay[data-fading="true"] .loader-corner--tr { transform: translate(60px, -60px); }
-.loader-overlay[data-fading="true"] .loader-corner--bl { transform: translate(-60px, 60px); }
-.loader-overlay[data-fading="true"] .loader-corner--br { transform: translate(60px, 60px); }
-.loader-overlay[data-fading="true"] .loader-corner {
-  transition: transform 0.7s cubic-bezier(0.65, 0, 0.35, 1);
-}
-.loader-overlay[data-fading="true"] .loader-wordmark {
-  transform: scale(1.06);
-  transition: transform 0.7s cubic-bezier(0.65, 0, 0.35, 1);
+@media (max-width: 760px) {
+  .loader-pct-big {
+    bottom: clamp(20px, 5vw, 40px);
+    right: clamp(20px, 5vw, 36px);
+    font-size: clamp(72px, 22vw, 140px);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .loader-grid,
-  .loader-scan,
-  .loader-caption-cursor,
-  .loader-ruler-line {
+  .loader-caption-char {
     animation: none !important;
+    opacity: 1;
+    filter: none;
+    transform: none;
   }
   .loader-char {
     animation-duration: 0.001ms !important;

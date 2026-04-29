@@ -4,37 +4,36 @@ import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { MeshSurfaceSampler } from "three/examples/jsm/math/MeshSurfaceSampler.js";
-import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import {
-  getPillarRevealRatio,
-  PILLAR_REVEAL_Y_BOTTOM,
-  PILLAR_REVEAL_Y_TOP,
-} from "@/lib/pillarRevealTimeline";
 import { scrollState } from "@/lib/scrollState";
 
 /**
- * Surface-accreting particle field.
+ * Surface-accreting particle field, driven by its chunk's reveal value.
  *
- * Tens of thousands of tiny points sampled across the prism's actual triangle
- * surface (via MeshSurfaceSampler on the merged GLB geometry). Targets are
- * accepted through a light spatial-hash rejection pass so the moving rebuild
- * front is dense without obvious stacked points. Each particle follows a
- * local 1/x graph where the model surface is the x-axis and the outer lower
- * ring is the y-axis, sits on the surface as the texture reveals there, then
- * fades once the real texture has taken over.
+ * Particles sampled across a single BufferGeometry's triangle surface (via
+ * MeshSurfaceSampler). Targets are accepted through a light spatial-hash
+ * rejection pass so the field is dense without obviously stacked points.
+ * Each particle follows a local 1/x graph from an outer "approach"
+ * starting point to the surface, sits on the surface as the texture
+ * reveals there, then fades once the real texture has taken over.
  *
- * Mounted as a child of Prism's inner spin group so origins and targets
- * share that group's local space — no per-frame matrix uniform needed,
- * the scene-graph transforms handle world placement automatically.
+ * Mounted as a child of one of the four chunk groups in PrismParts — the
+ * input geometry is the chunk's own slab geometry (already in chunkGroup-
+ * local space), so origins/approaches/targets ride the chunk's transform
+ * automatically as it explodes, tumbles, or zooms.
+ *
+ * The reveal sweep is scoped to THIS chunk: each particle has a per-chunk
+ * `aRelY` attribute (0 at top of chunk, 1 at bottom) and the shader's
+ * uProgress is fed `scrollState.pillarChunkReveal[chunkIndex]`. So particles
+ * deliver top-to-bottom within their chunk over the chunk's focus phase,
+ * synced 1:1 with the texture wavefront in PrismParts' material shader.
  */
 
-const DESKTOP_COUNT = 52000;
-const MOBILE_COUNT = 18000;
+// Per-chunk counts. Total across all four ≈ original whole-prism count.
+const DESKTOP_COUNT = 13000;
+const MOBILE_COUNT = 4500;
 const DESKTOP_SPACING = 0.0085;
 const MOBILE_SPACING = 0.0125;
 const SURFACE_LIFT = 0.003;
-const PARTICLE_REVEAL_TOP = 0.08;
-const PARTICLE_REVEAL_BOTTOM = 0.92;
 const RNG_SEED = 0x4d3a7c21;
 
 function createRandom(seed: number) {
@@ -55,8 +54,6 @@ const VERTEX_SHADER = `
   uniform float uProgress;
   uniform float uTime;
   uniform float uSize;
-  uniform float uRevealTop;
-  uniform float uRevealBottom;
 
   attribute vec3 aOrigin;
   attribute vec3 aApproach;
@@ -64,7 +61,7 @@ const VERTEX_SHADER = `
   attribute vec3 aNormal;
   attribute float aSeed;
   attribute float aSize;
-  attribute float aDelay;
+  attribute float aRelY;
 
   varying float vAlpha;
   varying vec3 vColor;
@@ -73,12 +70,11 @@ const VERTEX_SHADER = `
     vec3 normal = normalize(aNormal);
 
     vec3 surface = aTarget;
-    vec4 surfaceWorld = modelMatrix * vec4(surface, 1.0);
-    float revealAt = clamp(
-      (uRevealTop - surfaceWorld.y) / max(uRevealTop - uRevealBottom, 0.001),
-      0.0,
-      1.0
-    );
+    // Reveal-at is the particle's vertical position WITHIN ITS CHUNK
+    // (0 at the top of the chunk, 1 at the bottom). Computed at attribute
+    // build time so the value stays locked to the surface even as the
+    // chunk explodes / tumbles / zooms.
+    float revealAt = aRelY;
     float startAt = max(revealAt - 0.24, 0.0);
     float t = clamp((uProgress - startAt) / max(revealAt - startAt, 0.001), 0.0, 1.0);
 
@@ -135,10 +131,16 @@ const FRAGMENT_SHADER = `
 `;
 
 type Props = {
-  cloned: THREE.Group;
+  /** BufferGeometry for one chunk, already in chunkGroup-local space. */
+  geometry: THREE.BufferGeometry;
+  /** Index 0..3 — selects scrollState.pillarChunkReveal[chunkIndex]. */
+  chunkIndex: number;
 };
 
-export default function PrismParticles({ cloned }: Props) {
+export default function PrismParticles({
+  geometry: srcGeometry,
+  chunkIndex,
+}: Props) {
   const pointsRef = useRef<THREE.Points>(null);
 
   const { geometry, material } = useMemo(() => {
@@ -149,50 +151,13 @@ export default function PrismParticles({ cloned }: Props) {
     const baseSpacing = isMobile ? MOBILE_SPACING : DESKTOP_SPACING;
     const random = createRandom(RNG_SEED);
 
-    // Build a sampler over the cloned scene's geometry. We accumulate each
-    // mesh's local matrix chain up to `cloned` (NOT including spinRef etc.)
-    // so the merged geometry is in cloned-internal space — which is exactly
-    // the local space of <PrismParticles> when it's mounted inside spinRef.
-    cloned.traverse((obj) => obj.updateMatrix());
-
-    const geometries: THREE.BufferGeometry[] = [];
-    const tmpMatrix = new THREE.Matrix4();
-
-    cloned.traverse((obj) => {
-      const m = obj as THREE.Mesh;
-      if (!m.isMesh || !m.geometry) return;
-
-      // Compose: cloned.matrix × ... × parent.matrix × mesh.matrix.
-      const chain: THREE.Matrix4[] = [m.matrix.clone()];
-      let parent: THREE.Object3D | null = m.parent;
-      while (parent && parent !== cloned) {
-        chain.unshift(parent.matrix.clone());
-        parent = parent.parent;
-      }
-      chain.unshift(cloned.matrix.clone());
-      tmpMatrix.identity();
-      for (const mat of chain) tmpMatrix.multiply(mat);
-
-      // Strip everything except position (+ optional index) so all
-      // geometries have a uniform attribute layout for mergeGeometries.
-      const src = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry;
-      const g = new THREE.BufferGeometry();
-      g.setAttribute("position", src.attributes.position.clone());
-      g.applyMatrix4(tmpMatrix);
-      geometries.push(g);
-      if (src !== m.geometry) src.dispose();
-    });
-
-    if (geometries.length === 0) {
+    if (!srcGeometry.attributes.position) {
       return { geometry: new THREE.BufferGeometry(), material: null };
     }
 
-    const merged = mergeGeometries(geometries);
-    if (!merged) {
-      for (const g of geometries) g.dispose();
-      return { geometry: new THREE.BufferGeometry(), material: null };
-    }
-    merged.computeVertexNormals();
+    // Clone so we don't mutate the rendered chunk's BufferGeometry.
+    const merged = srcGeometry.clone();
+    if (!merged.attributes.normal) merged.computeVertexNormals();
     merged.computeBoundingBox();
 
     const box = merged.boundingBox ?? new THREE.Box3();
@@ -219,7 +184,7 @@ export default function PrismParticles({ cloned }: Props) {
     const approaches = new Float32Array(count * 3);
     const seeds = new Float32Array(count);
     const sizes = new Float32Array(count);
-    const delays = new Float32Array(count);
+    const relYs = new Float32Array(count);
 
     const tmpPos = new THREE.Vector3();
     const tmpNorm = new THREE.Vector3();
@@ -288,7 +253,11 @@ export default function PrismParticles({ cloned }: Props) {
         radial.normalize();
       }
 
+      // 0 at the top of the chunk, 1 at the bottom — same orientation as
+      // the chunk-mesh shader's vChunkRelY so particles deliver in lockstep
+      // with the texture wavefront.
       const yNorm = Math.max(0, Math.min(1, (tmpPos.y - minY) / height));
+      const aRel = 1 - yNorm;
       const xAxisDirection = random() < 0.5 ? -1 : 1;
       const xSpan = Math.max(size.x, size.z) * (0.42 + random() * 0.26);
       const originAngle =
@@ -310,9 +279,7 @@ export default function PrismParticles({ cloned }: Props) {
 
       seeds[accepted] = seed;
       sizes[accepted] = (isMobile ? 9.5 : 11.5) + random() * 3.0;
-      delays[accepted] =
-        PARTICLE_REVEAL_TOP +
-        (PARTICLE_REVEAL_BOTTOM - PARTICLE_REVEAL_TOP) * (1 - yNorm);
+      relYs[accepted] = aRel;
 
       const bucketKey = hashCell(targetX, targetY, targetZ, cellSize);
       const bucket = grid.get(bucketKey);
@@ -394,8 +361,8 @@ export default function PrismParticles({ cloned }: Props) {
       new THREE.BufferAttribute(sizes.slice(0, accepted), 1),
     );
     geo.setAttribute(
-      "aDelay",
-      new THREE.BufferAttribute(delays.slice(0, accepted), 1),
+      "aRelY",
+      new THREE.BufferAttribute(relYs.slice(0, accepted), 1),
     );
     geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 11);
 
@@ -404,8 +371,6 @@ export default function PrismParticles({ cloned }: Props) {
         uProgress: { value: 0 },
         uTime: { value: 0 },
         uSize: { value: 1 },
-        uRevealTop: { value: PILLAR_REVEAL_Y_TOP },
-        uRevealBottom: { value: PILLAR_REVEAL_Y_BOTTOM },
       },
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
@@ -415,12 +380,11 @@ export default function PrismParticles({ cloned }: Props) {
       blending: THREE.NormalBlending,
     });
 
-    // Free temporaries.
-    for (const g of geometries) g.dispose();
+    // Free the cloned source — geo is the new buffer for the Points.
     merged.dispose();
 
     return { geometry: geo, material: mat };
-  }, [cloned]);
+  }, [srcGeometry]);
 
   useEffect(() => {
     return () => {
@@ -432,11 +396,21 @@ export default function PrismParticles({ cloned }: Props) {
   useFrame((state) => {
     if (!material) return;
     const p = scrollState.pillarSectionProgress;
-    material.uniforms.uProgress.value = getPillarRevealRatio(p);
+
+    // The loader is now driven by PrismAssemblyShards (real model
+    // fragments flying into place), not by particles. Particles are
+    // section-II-only — they accrete onto chunks during the dissection
+    // reveal and stay hidden everywhere else.
+    material.uniforms.uProgress.value =
+      scrollState.pillarChunkReveal[chunkIndex] ?? 0;
     material.uniforms.uTime.value = state.clock.elapsedTime;
+    material.uniforms.uSize.value = 1.0;
+    if (material.blending !== THREE.NormalBlending) {
+      material.blending = THREE.NormalBlending;
+      material.needsUpdate = true;
+    }
+    material.depthTest = true;
     if (pointsRef.current) {
-      // Hide outside the pillar section so the accumulated particles don't
-      // linger over later sections (where the model has moved/scaled).
       pointsRef.current.visible = p > 0.001 && p < 0.999;
     }
   });

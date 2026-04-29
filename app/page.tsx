@@ -14,6 +14,7 @@ import SectionDivider from "@/components/ui/SectionDivider";
 import CanvasMount from "@/components/canvas/CanvasMount";
 import PrismController from "@/components/canvas/PrismController";
 import RefreshScroll from "@/components/ui/RefreshScroll";
+import PillarLeaderOverlay from "@/components/sections/PillarLeaderOverlay";
 
 export default function Page() {
   return (
@@ -23,7 +24,12 @@ export default function Page() {
       <CarouselController />
       <PrismController />
 
-      <div className="relative z-10">
+      <div className="reelai-content relative z-10">
+        {/* Leader-card overlay lives inside the gated content layer so the
+            cards don't show through during the loader. PillarLeaderOverlay
+            is `position: fixed`, so DOM nesting only affects opacity /
+            visibility cascade, not layout. */}
+        <PillarLeaderOverlay />
         <Nav />
         <Scrollbar />
         <Hero />
