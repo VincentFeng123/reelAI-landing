@@ -1,13 +1,19 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { useGsapScroll, gsap } from "@/hooks/useGsapScroll";
 import Arrow from "@/components/ui/Arrow";
 
 export default function Hero() {
+  const tlRef = useRef<gsap.core.Timeline | null>(null);
+
   const ref = useGsapScroll<HTMLElement>(() => {
+    // Build the timeline paused so we can fire it in sync with the
+    // LoadingScreen fade — otherwise the animation runs behind the loader
+    // curtain and the user never sees it.
     const tl = gsap.timeline({
       defaults: { ease: "expo.out" },
-      delay: 0.15,
+      paused: true,
     });
 
     tl.from("[data-anim='hero-meta']", {
@@ -36,6 +42,40 @@ export default function Hero() {
         { opacity: 0, y: 14, duration: 0.9 },
         "-=0.8",
       );
+
+    tlRef.current = tl;
+  }, []);
+
+  useEffect(() => {
+    const play = () => tlRef.current?.play();
+
+    // If the loader is already gone (e.g. fast refresh), fire immediately.
+    const loaderPresent =
+      typeof document !== "undefined" &&
+      document.querySelector(".loader-overlay");
+    if (!loaderPresent) {
+      play();
+      return;
+    }
+
+    // The `reelai:loader-fade` event fires at the moment the loader STARTS
+    // fading out (loaderActive flips false). The content layer
+    // (.reelai-content) has a 850 ms reveal delay so it waits for the
+    // loader's own 850 ms exit transition to finish — Hero's stagger must
+    // wait the same amount or it plays behind the loader curtain.
+    let delayed = 0;
+    const onFade = () => {
+      delayed = window.setTimeout(play, 850);
+    };
+    window.addEventListener("reelai:loader-fade", onFade, { once: true });
+    // Fallback in case the loader event is missed (HMR, race conditions).
+    const fallback = setTimeout(play, 4500);
+
+    return () => {
+      window.removeEventListener("reelai:loader-fade", onFade);
+      clearTimeout(fallback);
+      if (delayed) clearTimeout(delayed);
+    };
   }, []);
 
   return (

@@ -8,12 +8,22 @@ import { scrollState } from "@/lib/scrollState";
  * offset, outer Y rotation in radians, and target scale. The Prism's useFrame
  * lerps toward these targets.
  *
- * Approach: every frame we compute which section the viewport's vertical
- * centre currently sits inside, then apply that section's targets. This is
- * direction-agnostic — backward scrolling restores state correctly because
- * the active section is derived from current scroll position, not from
+ * Approach: every frame we compute which section the viewport's TOP edge
+ * currently sits inside (active = the last section whose offsetTop ≤
+ * window.scrollY) and apply that section's targets. This is direction-
+ * agnostic — backward scrolling restores state correctly because the
+ * active section is derived from current scroll position, not from
  * onEnter/onEnterBack callbacks (which can miss firings when sections
  * overlap or are pinned).
+ *
+ * Why scrollY (viewport top) and not viewport centre: when viewport-centre
+ * is the reference, the centre crosses a section boundary BEFORE the user
+ * actually leaves that section, so the prism starts shifting toward the
+ * next pose during the bottom half of the previous section. The reverse
+ * problem on scroll-back: the prism stays in the next-section pose until
+ * viewport centre re-enters the previous section's range, leaving e.g. the
+ * pillar's 50° tilt visible while the user is back in hero. Tying active
+ * to scrollY makes the boundary symmetric on both directions.
  *
  * The "range" for a section is [its top, the next section's top]. This
  * automatically handles GSAP-pinned sections (PillarSection, Technology),
@@ -30,14 +40,18 @@ type Section = {
   x: number;
   y: number;
   rotY: number;
+  /** Optional Z rotation offset added on top of the base TILT_Z. Default 0. */
+  rotZ?: number;
   scale: number;
 };
 
 const SECTIONS: Section[] = [
   // Hero — centred and prominent as the opening focal moment.
   { id: "hero",            x: 0,    y: 0,    rotY: 0,     scale: 1.5  },
-  // Pillar — centred, scaled up; stage rotation handles facets on inner.
-  { id: "pillar-section",  x: 0,    y: 0,    rotY: 0,     scale: 1.9  },
+  // Pillar — centred, tipped 50° CCW around Z so the horizontal slabs
+  // read on a diagonal (upper-left → lower-right). Scale is restrained so
+  // the four exploded slabs fit with their adjacent text labels.
+  { id: "pillar-section",  x: 0,    y: 0,    rotY: 0,     rotZ: (Math.PI / 180) * 50, scale: 1.3 },
   // Problem — drifts upper-right, rotates away.
   { id: "problem",         x: 1.6,  y: 0.4,  rotY: -0.55, scale: 0.95 },
   // Solution — drifts lower-left as counterweight to right headline.
@@ -87,30 +101,39 @@ export default function PrismController() {
     const tick = () => {
       // Hot path: only number reads + comparisons. Metrics are cached and
       // refreshed on layout-changing events, NOT every frame.
-      if (metrics.length > 0) {
-        const viewportCenter = window.scrollY + window.innerHeight / 2;
+      if (scrollState.loaderActive) {
+        // Loader phase: prism sits OFF-CENTER LEFT, slightly rotated, so
+        // the post-loading transition to the centred hero pose reads as
+        // a visible shift + rotate beat. Targets are written here (not
+        // bypassing the section logic with a separate pose ref) so the
+        // existing per-section lerp in Prism.tsx continues to drive the
+        // movement smoothly when loaderActive flips to false.
+        scrollState.prismTargetX = -1.2;
+        scrollState.prismTargetY = 0.1;
+        scrollState.prismTargetRotY = -0.45;
+        scrollState.prismTargetRotZ = 0;
+        scrollState.pillarTargetScale = 1.35;
+      } else if (metrics.length > 0) {
+        const scrollY = window.scrollY;
 
+        // Active = the last section whose top is at or above scrollY.
+        // Metrics are pre-sorted ascending by top, so we walk forward
+        // and keep updating active while m.top <= scrollY; the moment a
+        // metric's top crosses above scrollY we stop.
         let active: Section = metrics[0].s;
-        const last = metrics[metrics.length - 1];
-
-        if (viewportCenter >= last.top + last.height) {
-          active = last.s;
-        } else {
-          for (let i = 0; i < metrics.length; i++) {
-            const m = metrics[i];
-            const next = metrics[i + 1];
-            const rangeStart = m.top;
-            const rangeEnd = next ? next.top : m.top + m.height;
-            if (viewportCenter >= rangeStart && viewportCenter < rangeEnd) {
-              active = m.s;
-              break;
-            }
+        for (let i = 0; i < metrics.length; i++) {
+          const m = metrics[i];
+          if (m.top <= scrollY) {
+            active = m.s;
+          } else {
+            break;
           }
         }
 
         scrollState.prismTargetX = active.x;
         scrollState.prismTargetY = active.y;
         scrollState.prismTargetRotY = active.rotY;
+        scrollState.prismTargetRotZ = active.rotZ ?? 0;
         scrollState.pillarTargetScale = active.scale;
       }
 
